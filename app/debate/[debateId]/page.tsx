@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { Streamdown } from 'streamdown'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { use, useEffect, useMemo, useRef, useState } from 'react'
 import type { StreamChunk } from '@tanstack/ai'
 import { fetchServerSentEvents } from '@tanstack/ai-react'
 import { useQuery } from '@tanstack/react-query'
@@ -16,9 +16,9 @@ function clamp(n: number, min: number, max: number) {
 export default function DebateRoomPage({
   params,
 }: {
-  params: { debateId: string }
+  params: Promise<{ debateId: string }>
 }) {
-  const debateId = params.debateId
+  const { debateId } = use(params)
   const deviceId = getDeviceId()
 
   const debateQuery = useQuery({
@@ -45,9 +45,22 @@ export default function DebateRoomPage({
   }>({ byMessageId: {}, order: [], isRunning: false })
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const streamingChars = useMemo(
+    () =>
+      streaming.order.reduce(
+        (n, id) => n + (streaming.byMessageId[id]?.content?.length ?? 0),
+        0,
+      ),
+    [streaming.byMessageId, streaming.order],
+  )
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ block: 'end' })
-  }, [debateQuery.data?.messages?.length, streaming.order.length])
+  }, [
+    debateQuery.data?.messages?.length,
+    streaming.order.length,
+    streamingChars,
+  ])
 
   const currentRound = useMemo(() => {
     const msgs: Array<any> = debateQuery.data?.messages ?? []
@@ -129,7 +142,8 @@ export default function DebateRoomPage({
           <div className="min-w-0">
             <p className="island-kicker mb-2">Debate Room</p>
             <h1 className="display-title mb-2 text-3xl font-bold text-[var(--sea-ink)] sm:text-4xl">
-              Debate <span className="text-[var(--lagoon-deep)]">{debateId}</span>
+              Debate{' '}
+              <span className="text-[var(--lagoon-deep)]">{debateId}</span>
             </h1>
             <p className="m-0 text-sm leading-7 text-[var(--sea-ink-soft)]">
               Round {Math.min(currentRound + 1, totalRounds || 1)} of{' '}
@@ -156,7 +170,9 @@ export default function DebateRoomPage({
             </button>
             <button
               type="button"
-              disabled={streaming.isRunning || debateQuery.data?.status === 'completed'}
+              disabled={
+                streaming.isRunning || debateQuery.data?.status === 'completed'
+              }
               onClick={() => void runNextRound()}
               className="rounded-full border border-[rgba(50,143,151,0.3)] bg-[rgba(79,184,178,0.14)] px-4 py-2 text-sm font-semibold text-[var(--lagoon-deep)] transition hover:-translate-y-0.5 hover:bg-[rgba(79,184,178,0.24)] disabled:opacity-60"
             >
@@ -180,7 +196,7 @@ export default function DebateRoomPage({
 
         <div className="mt-6 grid gap-5 lg:grid-cols-[1fr_320px]">
           <section className="rounded-2xl border border-[var(--line)] bg-white/30 p-4 dark:bg-black/10">
-            <div className="mt-4 h-[55vh] overflow-y-auto rounded-xl border border-[var(--line)] bg-[rgba(255,255,255,0.35)] dark:bg-[rgba(0,0,0,0.12)]">
+            <div className="mt-4 h-[min(calc(100dvh-13rem),100rem)] overflow-y-auto rounded-xl border border-[var(--line)] bg-[rgba(255,255,255,0.35)] dark:bg-[rgba(0,0,0,0.12)]">
               <div className="p-4">
                 {(debateQuery.data?.messages ?? []).map((m: any) => {
                   const agent = (debateQuery.data?.agents as any[])?.find(
@@ -193,7 +209,10 @@ export default function DebateRoomPage({
                       </div>
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-2">
-                          <span className="text-sm font-bold" style={{ color: agent?.color }}>
+                          <span
+                            className="text-sm font-bold"
+                            style={{ color: agent?.color }}
+                          >
                             {agent?.name ?? m.agentId}
                           </span>
                           <span className="rounded-full border border-[var(--line)] bg-white/60 px-2 py-0.5 text-xs font-semibold text-[var(--sea-ink-soft)] dark:bg-black/10">
@@ -208,9 +227,14 @@ export default function DebateRoomPage({
                   )
                 })}
 
-                {streaming.order.length ? (
-                  <div className="mt-6">
+                {streaming.isRunning || streaming.order.length ? (
+                  <div className="mt-6 min-h-[min(52vh,42rem)] rounded-xl border border-[var(--line)] bg-[rgba(255,255,255,0.45)] p-4 dark:bg-[rgba(0,0,0,0.14)]">
                     <p className="island-kicker mb-3">Streaming…</p>
+                    {streaming.isRunning && !streaming.order.length ? (
+                      <p className="m-0 text-sm text-[var(--sea-ink-soft)]">
+                        Waiting for agents…
+                      </p>
+                    ) : null}
                     {streaming.order.map((id) => {
                       const sm = streaming.byMessageId[id]
                       if (!sm) return null
@@ -224,7 +248,10 @@ export default function DebateRoomPage({
                           </div>
                           <div className="min-w-0 flex-1">
                             <div className="flex flex-wrap items-center gap-2">
-                              <span className="text-sm font-bold" style={{ color: agent?.color }}>
+                              <span
+                                className="text-sm font-bold"
+                                style={{ color: agent?.color }}
+                              >
                                 {sm.agentName}
                               </span>
                               <span className="rounded-full border border-[var(--line)] bg-white/60 px-2 py-0.5 text-xs font-semibold text-[var(--sea-ink-soft)] dark:bg-black/10">
@@ -260,7 +287,10 @@ export default function DebateRoomPage({
                 >
                   <div className="flex items-center gap-2">
                     <span className="text-lg">{a.avatar}</span>
-                    <span className="text-sm font-bold" style={{ color: a.color }}>
+                    <span
+                      className="text-sm font-bold"
+                      style={{ color: a.color }}
+                    >
                       {a.name}
                     </span>
                   </div>
@@ -276,4 +306,3 @@ export default function DebateRoomPage({
     </main>
   )
 }
-

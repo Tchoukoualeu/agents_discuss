@@ -1,18 +1,16 @@
-import { z } from 'zod'
 import { nanoid } from 'nanoid'
 import { chat, toServerSentEventsResponse, type StreamChunk } from '@tanstack/ai'
 import { openaiText } from '@tanstack/ai-openai'
 
+import { deviceIdFromAiPostBodySchema } from '#/server/debate/aiPostBody'
 import { getMongoDb } from '#/server/db/mongo'
 import { getOpenAiConfig } from '#/server/openai'
-
-const inputSchema = z.object({ deviceId: z.string().min(1) })
 
 export async function POST(
   req: Request,
   { params }: { params: Promise<{ debateId: string }> },
 ) {
-  const { deviceId } = inputSchema.parse(await req.json())
+  const deviceId = deviceIdFromAiPostBodySchema.parse(await req.json())
   const { debateId } = await params
 
   const db = await getMongoDb()

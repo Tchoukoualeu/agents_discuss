@@ -2,7 +2,9 @@
 
 import Link from 'next/link'
 import { Streamdown } from 'streamdown'
-import { useMemo } from 'react'
+import type { StreamChunk } from '@tanstack/ai'
+import { fetchServerSentEvents } from '@tanstack/ai-react'
+import { use, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 
 import { getDeviceId } from '#/lib/deviceId'
@@ -10,9 +12,9 @@ import { getDeviceId } from '#/lib/deviceId'
 export default function ResultsPage({
   params,
 }: {
-  params: { debateId: string }
+  params: Promise<{ debateId: string }>
 }) {
-  const debateId = params.debateId
+  const { debateId } = use(params)
   const deviceId = getDeviceId()
 
   const debateQuery = useQuery({
@@ -26,6 +28,37 @@ export default function ResultsPage({
     },
   })
 
+  const [synthStreaming, setSynthStreaming] = useState('')
+  const [synthRunning, setSynthRunning] = useState(false)
+  const [synthError, setSynthError] = useState<string | undefined>()
+
+  async function runSynthesize() {
+    setSynthError(undefined)
+    setSynthStreaming('')
+    setSynthRunning(true)
+    try {
+      const connection = fetchServerSentEvents(`/api/debate/${debateId}/synthesize`)
+      const stream = connection.connect([], { deviceId })
+      for await (const chunk of stream) {
+        const c = chunk as StreamChunk
+        if (c.type === 'TEXT_MESSAGE_CONTENT') {
+          setSynthStreaming((prev) => prev + c.delta)
+        }
+      }
+      const refetched = await debateQuery.refetch()
+      if (refetched.data?.finalAnswer) setSynthStreaming('')
+    } catch (err) {
+      setSynthError((err as Error).message)
+    } finally {
+      setSynthRunning(false)
+    }
+  }
+
+  const bestAnswerText =
+    (debateQuery.data?.finalAnswer && String(debateQuery.data.finalAnswer).trim()) ||
+    synthStreaming.trim() ||
+    ''
+
   const exportMarkdown = useMemo(() => {
     const d: any = debateQuery.data
     if (!d) return ''
@@ -36,7 +69,9 @@ export default function ResultsPage({
     lines.push(d.question ?? '')
     lines.push(``)
     lines.push(`## Best Answer`)
-    lines.push(d.finalAnswer ?? '_Not synthesized yet._')
+    const answer =
+      (d.finalAnswer && String(d.finalAnswer).trim()) || synthStreaming.trim()
+    lines.push(answer || '_Not synthesized yet._')
     lines.push(``)
     lines.push(`## Transcript`)
     const agentsById = new Map<string, any>(
@@ -49,7 +84,7 @@ export default function ResultsPage({
       lines.push(``)
     }
     return lines.join('\n')
-  }, [debateQuery.data])
+  }, [debateQuery.data, synthStreaming])
 
   return (
     <main className="page-wrap px-4 py-12">
@@ -60,6 +95,14 @@ export default function ResultsPage({
         </h1>
 
         <div className="mt-6 flex flex-wrap gap-3">
+          <button
+            type="button"
+            disabled={synthRunning}
+            onClick={() => void runSynthesize()}
+            className="rounded-full border border-[rgba(50,143,151,0.3)] bg-[rgba(79,184,178,0.14)] px-5 py-2.5 text-sm font-semibold text-[var(--lagoon-deep)] transition hover:-translate-y-0.5 hover:bg-[rgba(79,184,178,0.24)] disabled:opacity-60"
+          >
+            {synthRunning ? 'Generating best answer…' : 'Generate best answer'}
+          </button>
           <button
             type="button"
             onClick={() => void navigator.clipboard.writeText(exportMarkdown)}
@@ -84,8 +127,20 @@ export default function ResultsPage({
 
         <div className="mt-6 rounded-2xl border border-[var(--line)] bg-white/30 p-5 dark:bg-black/10">
           <p className="island-kicker mb-2">Best Answer</p>
-          <div className="prose prose-sm max-w-none dark:prose-invert">
-            <Streamdown>{String(debateQuery.data?.finalAnswer ?? '')}</Streamdown>
+          {!bestAnswerText && !synthRunning ? (
+            <p className="m-0 text-sm leading-7 text-[var(--sea-ink-soft)]">
+              Nothing here yet. Debates only store a consolidated answer after you run synthesis.
+              Use the Generate best answer button above once you have a transcript from the debate
+              room.
+            </p>
+          ) : null}
+          {synthError ? (
+            <p className="m-0 mt-3 text-sm font-semibold text-red-700 dark:text-red-300">
+              {synthError}
+            </p>
+          ) : null}
+          <div className="prose prose-sm mt-3 max-w-none dark:prose-invert">
+            {bestAnswerText ? <Streamdown>{bestAnswerText}</Streamdown> : null}
           </div>
         </div>
       </section>
